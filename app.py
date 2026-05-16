@@ -74,7 +74,7 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
                 BoxComponent(
                     layout='horizontal',
                     contents=[
-                        TextComponent(text='本次金額", color="#555555", size="md'),
+                        TextComponent(text='本次金額', color="#555555", size="md'),
                         TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
                     ]
                 ),
