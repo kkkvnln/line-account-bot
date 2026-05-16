@@ -17,9 +17,19 @@ handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
 
 DATA_FILE = "group_account.json"
 
-# 填入你的管理員USERID，多個用逗號隔開
+# 已添加兩位管理員
 ADMIN_LIST = [
-    "U27c2bccc9e129d9f417ecaa81a2cee14","U79559883cba75878fca84feebb5f5cf4"
+    "U79559883cba75878fca84feebb5f5cf4",
+    "U27c2bccc9e129d9f417ecaa81a2cee14"
+]
+
+# 定義所有合法指令
+CMD_LIST = [
+    "/ID",
+    "/設定群組資訊",
+    "/清帳",
+    "/撤回",
+    "/查帳"
 ]
 
 # 初始化數據
@@ -63,10 +73,8 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
         body=BoxComponent(
             layout='vertical',
             contents=[
-                # 標題
                 TextComponent(text=title, color='#22C55E', size='xl', weight='bold'),
                 SeparatorComponent(margin="md"),
-                # 上次金額
                 BoxComponent(
                     layout='horizontal',
                     contents=[
@@ -74,7 +82,6 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
                         TextComponent(text=f"{last_amount} {currency}", color='#D2691E', size='md', align='end')
                     ]
                 ),
-                # 本次金額
                 BoxComponent(
                     layout='horizontal',
                     margin="md",
@@ -84,7 +91,6 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
                     ]
                 ),
                 SeparatorComponent(margin="md"),
-                # 狀態
                 BoxComponent(
                     layout='horizontal',
                     contents=[
@@ -93,7 +99,6 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
                     ]
                 ),
                 SeparatorComponent(margin="md"),
-                # 備註
                 BoxComponent(
                     layout='horizontal',
                     contents=[
@@ -123,17 +128,26 @@ def handle_msg(event):
     msg = event.message.text.strip()
     g = get_group_data(group_id)
 
-    # 所有人通用：查詢自己ID
+    # 判斷收支記帳格式
+    is_money_cmd = (msg.startswith("+") or msg.startswith("-")) and len(msg.split(" ",1)[0])>1 and msg.split(" ",1)[0][1:].isdigit()
+    # 判斷系統指令
+    is_sys_cmd = any(msg.startswith(c) for c in CMD_LIST)
+
+    # 日常聊天閒聊直接忽略不回覆
+    if not is_sys_cmd and not is_money_cmd:
+        return
+
+    # 所有人可查詢ID
     if msg == "/ID":
         line_bot_api.reply_message(event.reply_token,TextSendMessage(text=f"你的LINE UserID：\n{user_id}"))
         return
 
-    # 非管理員禁止使用所有功能
+    # 非管理員禁止使用功能
     if user_id not in ADMIN_LIST:
         line_bot_api.reply_message(event.reply_token,TextSendMessage(text="❌ 僅管理員可操作本機器人"))
         return
 
-    # === 設定群組資訊 ===
+    # 設定群組資訊
     if msg.startswith("/設定群組資訊@"):
         parts = msg.split("@")
         if len(parts) == 3:
@@ -145,16 +159,16 @@ def handle_msg(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式：/設定群組資訊@小金庫@台幣"))
         return
 
-    # === 清帳 ===
+    # 清帳歸零
     if msg == "/清帳":
         g["total_money"] = 0
         g["last_money"] = 0
         g["record_list"] = []
         save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅【{g['group_name']}】已歸零"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(f"✅【{g['group_name']}】已歸零"))
         return
 
-    # === 撤回 ===
+    # 撤回上一筆記錄
     if msg == "/撤回":
         if not g["record_list"]:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 無記錄可撤回"))
@@ -169,10 +183,10 @@ def handle_msg(event):
         else:
             status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
 
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"↩️ 撤回成功\n已刪除：{last['money']} ({last['note']})\n{status}"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(f"↩️ 撤回成功\n已刪除：{last['money']} ({last['note']})\n{status}"))
         return
 
-    # === 查帳 ===
+    # 查帳
     if msg == "/查帳":
         if g["total_money"] > 0:
             status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
@@ -190,7 +204,7 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, card)
         return
 
-    # === 記帳 + - ===
+    # 收支記帳
     parts = msg.split(" ", 1)
     money_str = parts[0]
     if (money_str.startswith("+") or money_str.startswith("-")) and money_str[1:].isdigit():
@@ -203,13 +217,11 @@ def handle_msg(event):
         g["record_list"].append({"money": amount, "note": note})
         save_group_data(group_id, g)
 
-        # 狀態
         if g["total_money"] > 0:
             status = f"目前你欠{g['group_name']}：{g['total_money']} {g['currency']}"
         else:
             status = f"目前{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
 
-        # 卡片
         card = build_account_card(
             title="✅ 記帳成功",
             last_amount=old_last,
@@ -220,14 +232,6 @@ def handle_msg(event):
         )
         line_bot_api.reply_message(event.reply_token, card)
         return
-
-    # 說明
-    help_txt = """📝 記帳指令
-/設定群組資訊@名稱@幣別
-+金額 備註 → 收入
--金額 備註 → 支出
-/查帳 /清帳 /撤回"""
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
