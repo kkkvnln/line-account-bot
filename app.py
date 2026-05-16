@@ -1,14 +1,12 @@
 from flask import Flask, request
 from linebot import LineBotApi
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import TextMessage, TextSendMessage, TemplateSendMessage, ButtonsTemplate, MessageAction
 import re
 
 app = Flask(__name__)
 
-# 你的 Access Token（不用改）
 line_bot_api = LineBotApi("fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU=")
 
-# 記帳用
 money = 0
 
 @app.route("/callback", methods=["POST"])
@@ -18,53 +16,84 @@ def callback():
         if data and "events" in data:
             for event in data["events"]:
                 if event["type"] == "message" and event["message"]["type"] == "text":
-                    reply_token = event["replyToken"]
+                    token = event["replyToken"]
                     text = event["message"]["text"].strip()
-                    reply = handle_text(text)
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=reply))
+                    reply_msg = handle_msg(text)
+                    line_bot_api.reply_message(token, reply_msg)
     except:
         pass
-    return "OK", 200
+    return "OK"
 
-def handle_text(text):
+def handle_msg(text):
     global money
 
-    # 1. 四則運算（自動偵測 + - * /）
+    # 計算機
     if re.match(r'^[\d\+\-\*/\s]+$', text):
         try:
-            result = eval(text)
-            return f"🧮 計算結果：{result}"
+            res = eval(text)
+            return TextSendMessage(text=f"🧮 結果：{res}")
         except:
-            return "⚠️ 計算錯誤"
+            return TextSendMessage(text="⚠️ 計算錯誤")
 
-    # 2. 記帳功能 +100 / -50
+    # 記帳
     if text.startswith("+"):
         try:
             num = int(text[1:])
             money += num
-            return f"✅ 記帳成功\n目前餘額：{money}"
+            return card_template(f"✅ 記帳成功", f"目前餘額：{money}")
         except:
-            return "⚠️ 格式：+數字（例：+100）"
+            return TextSendMessage(text="格式：+100")
 
     if text.startswith("-"):
         try:
             num = int(text[1:])
             money -= num
-            return f"✅ 記帳成功\n目前餘額：{money}"
+            return card_template(f"✅ 記帳成功", f"目前餘額：{money}")
         except:
-            return "⚠️ 格式：-數字（例：-50）"
+            return TextSendMessage(text="格式：-50")
 
-    # 3. 查餘額
-    if text in ["餘額", "查餘額", "錢"]:
-        return f"💰 目前餘額：{money}"
+    if text in ["餘額","查餘額"]:
+        return card_template("💰 目前餘額", str(money))
 
-    # 4. 重置記帳
     if text == "重置":
         money = 0
-        return "🔄 餘額已重置為 0"
+        return card_template("🔄 已重置", "餘額：0")
 
-    # 5. 預設回覆
-    return f"✅ 收到：{text}\n\n👉 可使用：\n+100、-50、餘額、重置、1+1、2*3"
+    # 選單卡片
+    if text in ["選單","功能","菜單","開始"]:
+        return menu_card()
+
+    return TextSendMessage(text="✅ 收到訊息！輸入「選單」看功能")
+
+# 卡片訊息
+def card_template(title, text):
+    return TemplateSendMessage(
+        alt_text="記帳卡片",
+        template=ButtonsTemplate(
+            title=title,
+            text=text,
+            actions=[
+                MessageAction(label="查餘額", text="餘額"),
+                MessageAction(label="重置", text="重置")
+            ]
+        )
+    )
+
+# 選單卡片
+def menu_card():
+    return TemplateSendMessage(
+        alt_text="功能選單",
+        template=ButtonsTemplate(
+            title="📋 記帳計算機",
+            text="請選擇功能",
+            actions=[
+                MessageAction(label="➕ 收入", text="+"),
+                MessageAction(label="➖ 支出", text="-"),
+                MessageAction(label="💰 查餘額", text="餘額"),
+                MessageAction(label="🔄 重置", text="重置")
+            ]
+        )
+    )
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0")
+    app.run()
