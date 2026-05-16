@@ -2,7 +2,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage,
+    MessageEvent, TextMessage, TextSendMessage,
     FlexSendMessage, BubbleContainer, BoxComponent,
     TextComponent, SeparatorComponent
 )
@@ -17,6 +17,9 @@ handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
 
 DATA_FILE = "group_account.json"
 
+# 你的初始管理員ID（就是你自己的）
+INIT_ADMINS = ["U79559883cba75878fca84feebb5f5cf4", "U27c2bccc9e129d9f417ecaa81a2cee14"]
+
 # 初始化整體數據
 def init_total_data():
     if not os.path.exists(DATA_FILE):
@@ -30,7 +33,7 @@ def save_total_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# 初始化單一群組資料
+# 初始化單一群組資料（加入初始管理員）
 def get_group_data(group_id):
     total_data = load_total_data()
     if group_id not in total_data:
@@ -40,7 +43,7 @@ def get_group_data(group_id):
             "total_money": 0,
             "last_money": 0,
             "record_list": [],
-            "admins": []
+            "admins": [{"name": "初始管理員", "uid": uid} for uid in INIT_ADMINS]
         }
         save_total_data(total_data)
     return total_data[group_id]
@@ -120,30 +123,12 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"你的LINE UserID：\n{user_id}"))
         return
 
-    # ========== 新增管理員指令（僅舊管理員可執行） ==========
-    if msg.startswith("/設定密碼@新增管理員@"):
-        if user_id not in admin_uid_list:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 權限不足，僅管理員可新增管理員"))
-            return
-        split_arr = msg.split("@")
-        if len(split_arr) != 4:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤\n正確格式：/設定密碼@新增管理員@名稱@userid"))
-            return
-        nick_name = split_arr[2]
-        target_uid = split_arr[3]
-        # 判斷是否已存在
-        is_exist = any(adm["uid"] == target_uid for adm in g_data["admins"])
-        if is_exist:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 該使用者已經是管理員"))
-            return
-        g_data["admins"].append({"name": nick_name, "uid": target_uid})
-        save_group_data(group_id, g_data)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ 新增管理員成功\n暱稱：{nick_name}\nUserID：{target_uid}"))
-        return
-
-    # ========== 非管理員直接攔截所有功能 ==========
+    # ========== 非管理員直接攔截所有功能（加上 try-except 避免崩潰） ==========
     if user_id not in admin_uid_list:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 您無使用權限，僅本群組管理員可操作"))
+        try:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 您無使用權限，僅本群組管理員可操作"))
+        except:
+            pass
         return
 
     # ========== 以下全部為管理員專用功能 ==========
@@ -243,4 +228,5 @@ def handle_msg(event):
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_info))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
