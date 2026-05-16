@@ -157,15 +157,18 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, card)
         return
 
-    # 拆分運算式 + 備註
-    msg_parts = msg.split(" ", 1)
-    expr = msg_parts[0]
-    note = msg_parts[1].strip() if len(msg_parts) == 2 else "無"
+    # ======================
+    # ✅ 嚴格規則：只能 + - 開頭，後面可加減乘除
+    # ======================
+    try:
+        msg_parts = msg.split(" ", 1)
+        expr = msg_parts[0].strip()
+        note = msg_parts[1].strip() if len(msg_parts) > 1 else "無"
 
-    # 判斷是否為合法加減運算式
-    if re.fullmatch(r'^[+-]\d+([+-]\d+)*$', expr):
-        try:
-            total = eval(expr)
+        # 規則：開頭必須是 + 或 -，後面可接 0-9 + - * /
+        if re.fullmatch(r'^[+-][\d+\-*/]+$', expr):
+            total = round(eval(expr), 2)
+
             old_last = g["last_money"]
             g["last_money"] = total
             g["total_money"] += total
@@ -187,14 +190,15 @@ def handle_msg(event):
             )
             line_bot_api.reply_message(event.reply_token, card)
             return
-        except:
-            pass
+    except:
+        pass
 
-    # 預設幫助訊息
+    # 說明
     help_txt = """📝 記帳指令
 /設定群組資訊@名稱@幣別
-+100 備註
-+100+250 合併記帳
++100  -50
++100*10  -2640*30
++100+200*3  混合運算
 /查帳 /清帳 /撤回"""
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
 
