@@ -8,6 +8,7 @@ from linebot.models import (
 )
 import json
 import os
+import re
 
 app = Flask(__name__)
 
@@ -58,44 +59,26 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
         body=BoxComponent(
             layout='vertical',
             contents=[
-                # 標題
                 TextComponent(text=title, color='#22C55E', size='xl', weight='bold'),
                 SeparatorComponent(margin="md"),
-                # 上次金額
-                BoxComponent(
-                    layout='horizontal',
-                    contents=[
-                        TextComponent(text='上次金額', color='#555555', size='md'),
-                        TextComponent(text=f"{last_amount} {currency}", color='#D2691E', size='md', align='end')
-                    ]
-                ),
-                # 本次金額
-                BoxComponent(
-                    layout='horizontal',
-                    margin="md",
-                    contents=[
-                        TextComponent(text='本次金額', color='#555555', size='md'),
-                        TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
-                    ]
-                ),
+                BoxComponent(layout='horizontal',contents=[
+                    TextComponent(text='上次金額', color='#555555', size='md'),
+                    TextComponent(text=f"{last_amount} {currency}", color='#D2691E', size='md', align='end')
+                ]),
+                BoxComponent(layout='horizontal',margin="md",contents=[
+                    TextComponent(text='本次金額', color='#555555', size='md'),
+                    TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
+                ]),
                 SeparatorComponent(margin="md"),
-                # 狀態
-                BoxComponent(
-                    layout='horizontal',
-                    contents=[
-                        TextComponent(text=status_text.split("：")[0], color='#555555', size='md'),
-                        TextComponent(text=status_text.split("：")[1], color='#D2691E', size='md', align='end')
-                    ]
-                ),
+                BoxComponent(layout='horizontal',contents=[
+                    TextComponent(text=status_text.split("：")[0], color='#555555', size='md'),
+                    TextComponent(text=status_text.split("：")[1], color='#D2691E', size='md', align='end')
+                ]),
                 SeparatorComponent(margin="md"),
-                # 備註
-                BoxComponent(
-                    layout='horizontal',
-                    contents=[
-                        TextComponent(text='備註', color='#555555', size='md'),
-                        TextComponent(text=note, color='#888888', size='md', align='end')
-                    ]
-                )
+                BoxComponent(layout='horizontal',contents=[
+                    TextComponent(text='備註', color='#555555', size='md'),
+                    TextComponent(text=note, color='#888888', size='md', align='end')
+                ])
             ]
         )
     )
@@ -174,42 +157,47 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, card)
         return
 
-    # === 記帳 + - ===
-    parts = msg.split(" ", 1)
-    money_str = parts[0]
-    if (money_str.startswith("+") or money_str.startswith("-")) and money_str[1:].isdigit():
-        amount = int(money_str)
-        note = parts[1] if len(parts) >= 2 else "無備註"
+    # ======================
+    # ✅ 支援「多則運算」+100+250-50
+    # ======================
+    try:
+        # 檢查是不是運算式（開頭 +-，後面都是數字與 +-）
+        if re.match(r'^[+-][\d+-]+$', msg):
+            # 直接計算總和
+            total = eval(msg)
+            note = "連續運算"
 
-        old_last = g["last_money"]
-        g["last_money"] = amount
-        g["total_money"] += amount
-        g["record_list"].append({"money": amount, "note": note})
-        save_group_data(group_id, g)
+            old_last = g["last_money"]
+            g["last_money"] = total
+            g["total_money"] += total
+            g["record_list"].append({"money": total, "note": note})
+            save_group_data(group_id, g)
 
-        # 狀態
-        if g["total_money"] > 0:
-            status = f"目前你欠{g['group_name']}：{g['total_money']} {g['currency']}"
-        else:
-            status = f"目前{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
+            # 狀態
+            if g["total_money"] > 0:
+                status = f"目前欠虎爺：{g['total_money']} {g['currency']}"
+            else:
+                status = f"目前虎爺欠：{abs(g['total_money'])} {g['currency']}"
 
-        # 卡片
-        card = build_account_card(
-            title="✅ 記帳成功",
-            last_amount=old_last,
-            current_amount=amount,
-            status_text=status,
-            note=note,
-            currency=g['currency']
-        )
-        line_bot_api.reply_message(event.reply_token, card)
-        return
+            # 卡片
+            card = build_account_card(
+                title="✅ 記帳成功",
+                last_amount=old_last,
+                current_amount=total,
+                status_text=status,
+                note=note,
+                currency=g['currency']
+            )
+            line_bot_api.reply_message(event.reply_token, card)
+            return
+    except:
+        pass
 
     # 說明
     help_txt = """📝 記帳指令
 /設定群組資訊@名稱@幣別
-+金額 備註 → 收入
--金額 備註 → 支出
++100 → 單筆
++100+250 → 多則
 /查帳 /清帳 /撤回"""
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
 
