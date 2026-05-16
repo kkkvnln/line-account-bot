@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 # 你的 LINE Bot 憑證
 line_bot_api = LineBotApi('fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('U27c2bccc9e129d9f417ecaa81a2cee14')
+handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
 
 DATA_FILE = "group_account.json"
 
@@ -35,7 +35,7 @@ CMD_LIST = [
 
 # 初始化數據
 def init_total_data():
-    if not os.exists(DATA_FILE):
+    if not os.path.exists(DATA_FILE):
         save_total_data({})
 
 def load_total_data():
@@ -44,7 +44,7 @@ def load_total_data():
 
 def save_total_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(data, ensure_ascii=False, indent=2)
 
 # 取得群組資料
 def get_group_data(group_id):
@@ -122,13 +122,13 @@ def callback():
         abort(400)
     return "OK"
 
-# 安全計算四則運算
-def calc_exp(s):
-    s = s.replace("×", "*").replace("÷", "/").replace(" ", "")
-    if not re.fullmatch(r'[\d+\-*/.]+', s):
-        return None
+# 安全計算
+def calculate(exp):
     try:
-        return eval(s, {"__builtins__":None}, {})
+        exp = exp.replace("×", "*").replace("÷", "/").replace(" ", "")
+        if not re.fullmatch(r'^[\d\+\-\*\/\.]+$', exp):
+            return None
+        return eval(exp, {"__builtins__": None}, {})
     except:
         return None
 
@@ -139,29 +139,37 @@ def handle_msg(event):
     msg = event.message.text.strip()
     g = get_group_data(group_id)
 
-    is_sys_cmd = any(msg.startswith(c) for c in CMD_LIST)
-    is_calc = calc_exp(msg) is not None
+    # 判斷指令
+    is_command = any(msg.startswith(c) for c in CMD_LIST)
+    # 判斷數學算式
+    calc_result = calculate(msg)
+    is_calc = calc_result is not None
 
-    if not is_sys_cmd and not is_calc:
+    # 一般聊天 => 不回覆
+    if not is_command and not is_calc:
         return
 
+    # 所有人可查 ID
     if msg == "/ID":
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"你的LINE UserID：\n{user_id}"))
         return
 
+    # 非管理員擋下
     if user_id not in ADMIN_LIST:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 僅管理員可操作"))
         return
 
+    # 設定群組
     if msg.startswith("/設定群組資訊@"):
         parts = msg.split("@")
         if len(parts) == 3:
             g["group_name"] = parts[1]
             g["currency"] = parts[2]
             save_group_data(group_id, g)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(f"✅ 設定成功\n群組：{g['group_name']}"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ 設定成功\n群組：{g['group_name']}\n幣別：{g['currency']}"))
         return
 
+    # 清帳
     if msg == "/清帳":
         g["total_money"] = 0
         g["last_money"] = 0
@@ -170,33 +178,42 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(f"✅【{g['group_name']}】已歸零"))
         return
 
+    # 撤回
     if msg == "/撤回":
         if not g["record_list"]:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage("❌ 無記錄"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage("❌ 無記錄可撤回"))
             return
         last = g["record_list"].pop()
         g["total_money"] -= last["money"]
         g["last_money"] = g["record_list"][-1]["money"] if g["record_list"] else 0
         save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage("↩️ 已撤回"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage("↩️ 撤回成功"))
         return
 
+    # 查帳
     if msg == "/查帳":
-        status = f"你欠{g['group_name']}：{g['total_money']}" if g["total_money"]>0 else f"{g['group_name']}欠你：{abs(g['total_money'])}"
+        if g["total_money"] > 0:
+            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
+        else:
+            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
         card = build_account_card(f"【{g['group_name']}】查帳", g["last_money"], 0, status, "無", g['currency'])
         line_bot_api.reply_message(event.reply_token, card)
         return
 
     # 四則運算記帳
-    val = calc_exp(msg)
-    if val is not None:
-        total = round(val, 2)
+    if is_calc:
+        total = round(calc_result, 2)
         old = g["last_money"]
         g["last_money"] = total
         g["total_money"] += total
-        g["record_list"].append({"money":total, "note":msg})
+        g["record_list"].append({"money": total, "note": msg})
         save_group_data(group_id, g)
-        status = f"你欠{g['group_name']}：{g['total_money']}" if g["total_money"]>0 else f"{g['group_name']}欠你：{abs(g['total_money'])}"
+
+        if g["total_money"] > 0:
+            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
+        else:
+            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
+        
         card = build_account_card("✅ 記帳成功", old, total, status, msg, g['currency'])
         line_bot_api.reply_message(event.reply_token, card)
         return
