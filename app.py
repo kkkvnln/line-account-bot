@@ -5,12 +5,11 @@ import re
 
 app = Flask(__name__)
 
-# 你的金鑰
 line_bot_api = LineBotApi("fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU=")
 
-# 全域變數：上次金額、目前金額
-last_money = 0.0
-current_money = 0.0
+# 記帳資料
+history = []
+current = 0.0
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -21,140 +20,81 @@ def callback():
                 if event["type"] == "message" and event["message"]["type"] == "text":
                     token = event["replyToken"]
                     msg = event["message"]["text"].strip()
-                    reply = handle_msg(msg)
-                    line_bot_api.reply_message(token, reply)
+
+                    # 只允許 4 種規則，其他不回覆
+                    if not (
+                        msg.startswith("+") or
+                        msg.startswith("-") or
+                        msg == "/清帳" or
+                        msg == "/撤回"
+                    ):
+                        continue  # 不回覆
+
+                    reply = run(msg)
+                    if reply:
+                        line_bot_api.reply_message(token, reply)
     except:
         pass
     return "OK"
 
-def handle_msg(msg):
-    global last_money, current_money
+def run(msg):
+    global current
+    try:
+        # + 收入
+        if msg.startswith("+"):
+            num = float(msg[1:])
+            history.append(current)
+            current += num
+            return card(f"{msg}", num, history[-1], current)
 
-    # 1. 四則運算（支援開頭負號、小數、空格）
-    if is_valid_expression(msg):
-        try:
-            result = eval(msg)
-            last_money = current_money
-            current_money += result
-            return build_flex_card(
-                calc_str=msg,
-                calc_result=result,
-                last=last_money,
-                current=current_money
-            )
-        except:
-            return TextSendMessage(text="⚠️ 計算錯誤，請輸入正確的數學式")
+        # - 支出
+        if msg.startswith("-"):
+            num = float(msg[1:])
+            history.append(current)
+            current -= num
+            return card(f"{msg}", num, history[-1], current)
 
-    # 2. 查詢目前金額
-    if msg in ["餘額", "查餘額", "虎爺欠"]:
-        return build_flex_card(
-            calc_str="查詢",
-            calc_result=0,
-            last=last_money,
-            current=current_money
-        )
+        # /清帳
+        if msg == "/清帳":
+            history.append(current)
+            current = 0.0
+            return TextSendMessage(text="✅ 已清帳")
 
-    # 3. 重置
-    if msg == "重置":
-        last_money = 0.0
-        current_money = 0.0
-        return TextSendMessage(text="🔄 金額已重置為 0")
+        # /撤回
+        if msg == "/撤回" and history:
+            current = history.pop()
+            return TextSendMessage(text=f"↩️ 已撤回\n目前餘額：{current:.2f}")
 
-    # 預設回覆
-    return TextSendMessage(text="✅ 收到！\n輸入數學式（例：-2460*2）或「餘額」查詢")
+    except:
+        pass
+    return None
 
-# 修正：支援開頭負號的數學式判斷
-def is_valid_expression(text):
-    # 允許：開頭可選負號、數字、+-*/、空格、小數點
-    pattern = r'^-?[\d\s\.\+\-\*\/]+$'
-    return re.match(pattern, text) is not None
-
-# 建立和你圖中一樣風格的 Flex 卡片
-def build_flex_card(calc_str, calc_result, last, current):
-    bubble = BubbleContainer(
-        body=BoxComponent(
-            layout="vertical",
-            contents=[
-                # 標題
-                TextComponent(
-                    text="計算結果",
-                    color="#009944",
-                    size="xl",
-                    weight="bold"
-                ),
-                # 計算式
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    contents=[
-                        SpacerComponent(),
-                        TextComponent(
-                            text=f"{calc_str}={calc_result}",
-                            color="#993300",
-                            size="lg"
-                        )
-                    ]
-                ),
-                SeparatorComponent(margin="lg"),
-                # 上次金額
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    contents=[
-                        TextComponent(text="上次金額", size="lg"),
-                        SpacerComponent(),
-                        TextComponent(
-                            text=f"{last:.2f} 台幣",
-                            color="#993300",
-                            size="lg"
-                        )
-                    ]
-                ),
-                # 本次金額
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    contents=[
-                        TextComponent(text="本次金額", size="lg"),
-                        SpacerComponent(),
-                        TextComponent(
-                            text=f"{calc_result:.2f} 台幣",
-                            color="#993300",
-                            size="lg"
-                        )
-                    ]
-                ),
-                # 目前虎爺欠
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    contents=[
-                        TextComponent(text="目前虎爺欠", size="lg"),
-                        SpacerComponent(),
-                        TextComponent(
-                            text=f"{current:.2f} 台幣",
-                            color="#993300",
-                            size="lg"
-                        )
-                    ]
-                ),
-                SeparatorComponent(margin="lg"),
-                # 備註欄
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    contents=[
-                        TextComponent(text="備註", size="lg"),
-                        SpacerComponent()
-                    ]
-                )
-            ]
-        )
-    )
-
+# 你要的卡片格式
+def card(exp, val, last, now):
     return FlexSendMessage(
-        alt_text="計算結果卡片",
-        contents=bubble
+        alt_text="紀錄",
+        contents=BubbleContainer(
+            body=BoxComponent(
+                layout="vertical",
+                contents=[
+                    TextComponent(text="紀錄完成", color="#1E40AF", size="xl", weight="bold"),
+                    BoxComponent(layout="horizontal", margin="md", contents=[
+                        TextComponent(text=f"{exp}"),
+                        SpacerComponent(),
+                        TextComponent(text=f"{val:.2f}")
+                    ]),
+                    SeparatorComponent(margin="md"),
+                    BoxComponent(layout="horizontal", margin="md", contents=[
+                        TextComponent(text="上次金額"), SpacerComponent(),
+                        TextComponent(text=f"{last:.2f}")
+                    ]),
+                    BoxComponent(layout="horizontal", margin="md", contents=[
+                        TextComponent(text="目前餘額"), SpacerComponent(),
+                        TextComponent(text=f"{now:.2f}", color="#EAB308")
+                    ])
+                ]
+            )
+        )
     )
 
 if __name__ == "__main__":
