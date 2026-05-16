@@ -1,7 +1,11 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import (
+    MessageEvent, TextMessage,
+    FlexSendMessage, BubbleContainer, BoxComponent,
+    TextComponent, SeparatorComponent
+)
 import json
 import os
 
@@ -32,7 +36,7 @@ def get_group_data(group_id):
     if group_id not in total_data:
         total_data[group_id] = {
             "group_name": "未命名",
-            "currency": "元",
+            "currency": "台幣",
             "total_money": 0,
             "last_money": 0,
             "record_list": []
@@ -46,6 +50,56 @@ def save_group_data(group_id, data):
     save_total_data(total_data)
 
 init_total_data()
+
+# 建立卡片的工具函數
+def build_account_card(title, last_amount, current_amount, status_text, note, currency):
+    bubble = BubbleContainer(
+        direction='ltr',
+        body=BoxComponent(
+            layout='vertical',
+            contents=[
+                # 標題
+                TextComponent(text=title, color='#22C55E', size='xl', weight='bold'),
+                TextComponent(text=f"{current_amount}={current_amount}", color='#D2691E', size='lg', align='end'),
+                SeparatorComponent(),
+                # 上次金額
+                BoxComponent(
+                    layout='horizontal',
+                    contents=[
+                        TextComponent(text='上次金額', color='#555555', size='md'),
+                        TextComponent(text=f"{last_amount} {currency}", color='#D2691E', size='md', align='end')
+                    ]
+                ),
+                # 本次金額
+                BoxComponent(
+                    layout='horizontal',
+                    contents=[
+                        TextComponent(text='本次金額", color="#555555", size="md'),
+                        TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
+                    ]
+                ),
+                SeparatorComponent(),
+                # 狀態文字（你欠/欠你）
+                BoxComponent(
+                    layout='horizontal',
+                    contents=[
+                        TextComponent(text=status_text.split("：")[0], color='#555555', size='md'),
+                        TextComponent(text=status_text.split("：")[1], color='#D2691E', size='md', align='end')
+                    ]
+                ),
+                SeparatorComponent(),
+                # 備註
+                BoxComponent(
+                    layout='horizontal',
+                    contents=[
+                        TextComponent(text='備註', color='#555555', size='md'),
+                        TextComponent(text=note, color='#888888', size='md', align='end')
+                    ]
+                )
+            ]
+        )
+    )
+    return FlexSendMessage(alt_text=title, contents=bubble)
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -90,38 +144,36 @@ def handle_msg(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 無記錄可撤回"))
             return
         last = g["record_list"].pop()
+        old_total = g["total_money"]
         g["total_money"] -= last["money"]
         g["last_money"] = g["record_list"][-1]["money"] if g["record_list"] else 0
         save_group_data(group_id, g)
 
         # 狀態文字
         if g["total_money"] > 0:
-            status = f"你欠{g['group_name']}"
+            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
         else:
-            status = f"{g['group_name']}欠你"
+            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
 
-        reply = f"""📝 撤回結果
-──────────────────
-刪除：{last['money']} {g['currency']}
-備註：{last['note']}
-──────────────────
-目前 {status}：{abs(g['total_money'])} {g['currency']}"""
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"↩️ 撤回成功\n已刪除：{last['money']} ({last['note']})\n{status}"))
         return
 
     # === 查帳 ===
     if msg == "/查帳":
         if g["total_money"] > 0:
-            status = f"你欠{g['group_name']}"
+            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
         else:
-            status = f"{g['group_name']}欠你"
+            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
 
-        reply = f"""📊 帳務查詢
-──────────────────
-上次金額：{g['last_money']} {g['currency']}
-──────────────────
-目前 {status}：{abs(g['total_money'])} {g['currency']}"""
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        card = build_account_card(
+            title=f"【{g['group_name']}】帳務查詢",
+            last_amount=g["last_money"],
+            current_amount=0,
+            status_text=status,
+            note="",
+            currency=g['currency']
+        )
+        line_bot_api.reply_message(event.reply_token, card)
         return
 
     # === 記帳 + - ===
@@ -131,6 +183,9 @@ def handle_msg(event):
         amount = int(money_str)
         note = parts[1] if len(parts) >= 2 else "無備註"
 
+        old_last = g["last_money"]
+        old_total = g["total_money"]
+
         g["last_money"] = amount
         g["total_money"] += amount
         g["record_list"].append({"money": amount, "note": note})
@@ -138,19 +193,20 @@ def handle_msg(event):
 
         # 狀態文字
         if g["total_money"] > 0:
-            status = f"目前你欠{g['group_name']}"
+            status = f"目前你欠{g['group_name']}：{g['total_money']} {g['currency']}"
         else:
-            status = f"目前{g['group_name']}欠你"
+            status = f"目前{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
 
-        reply = f"""📝 計算結果
-──────────────────
-上次金額：{g['last_money'] - amount} {g['currency']}
-本次金額：{amount} {g['currency']}
-──────────────────
-{status}：{abs(g['total_money'])} {g['currency']}
-──────────────────
-備註：{note}"""
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        # 建立卡片
+        card = build_account_card(
+            title="計算結果",
+            last_amount=old_last,
+            current_amount=amount,
+            status_text=status,
+            note=note,
+            currency=g['currency']
+        )
+        line_bot_api.reply_message(event.reply_token, card)
         return
 
     # 說明
