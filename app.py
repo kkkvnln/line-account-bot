@@ -2,7 +2,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage,
+    MessageEvent, TextMessage, TextSendMessage,
     FlexSendMessage, BubbleContainer, BoxComponent,
     TextComponent, SeparatorComponent
 )
@@ -16,6 +16,11 @@ line_bot_api = LineBotApi('fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C
 handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
 
 DATA_FILE = "group_account.json"
+
+# 填入你的管理員USERID，多個用逗號隔開
+ADMIN_LIST = [
+    "U填你的ID"
+]
 
 # 初始化數據
 def init_total_data():
@@ -114,8 +119,19 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_msg(event):
     group_id = event.source.group_id if hasattr(event.source, "group_id") else event.source.user_id
+    user_id = event.source.user_id
     msg = event.message.text.strip()
     g = get_group_data(group_id)
+
+    # 所有人通用：查詢自己ID
+    if msg == "/ID":
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text=f"你的LINE UserID：\n{user_id}"))
+        return
+
+    # 非管理員禁止使用所有功能
+    if user_id not in ADMIN_LIST:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text="❌ 僅管理員可操作本機器人"))
+        return
 
     # === 設定群組資訊 ===
     if msg.startswith("/設定群組資訊@"):
