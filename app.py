@@ -19,7 +19,7 @@ DATA_FILE = "group_account.json"
 
 # 填入你的管理員USERID，多個用逗號隔開
 ADMIN_LIST = [
-    "U填你的ID"
+    "U27c2bccc9e129d9f417ecaa81a2cee14"
 ]
 
 # 初始化數據
