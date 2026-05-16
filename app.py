@@ -9,23 +9,25 @@ from linebot.models import (
 import json
 import os
 import ast
-import operator
 
 app = Flask(__name__)
 
-# 你的 LINE Bot 憑證
-line_bot_api = LineBotApi('fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08IgrGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
+# 填入你自己正確的TOKEN和SECRET
+LINE_CHANNEL_ACCESS_TOKEN = "fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08IgrGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU="
+LINE_CHANNEL_SECRET = "44b024ae1f419f8443292df01c92d504"
+
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 DATA_FILE = "group_account.json"
 
-# 管理員列表
+# 雙管理員ID
 ADMIN_LIST = [
     "U79559883cba75878fca84feebb5f5cf4",
     "U27c2bccc9e129d9f417ecaa81a2cee14"
 ]
 
-# 安全四則運算
+# 安全計算四則運算
 def safe_calc(s):
     try:
         s = s.replace("×", "*").replace("÷", "/").replace(" ", "")
@@ -46,7 +48,6 @@ def save_total_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# 取得群組資料
 def get_group_data(group_id):
     total_data = load_total_data()
     if group_id not in total_data:
@@ -67,7 +68,7 @@ def save_group_data(group_id, data):
 
 init_total_data()
 
-# 建立卡片
+# 記帳卡片模板
 def build_account_card(title, last_amount, current_amount, status_text, note, currency):
     bubble = BubbleContainer(
         direction='ltr',
@@ -112,6 +113,12 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
     )
     return FlexSendMessage(alt_text=title, contents=bubble)
 
+# 健康檢查路由
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot Running OK"
+
+# LINE回調路由
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -120,84 +127,90 @@ def callback():
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-    return "OK"
+    return 'OK'
 
-@handler.add(MessageEvent, TextMessage)
+@handler.add(MessageEvent, message=TextMessage)
 def handle_msg(event):
     group_id = event.source.group_id if hasattr(event.source, "group_id") else event.source.user_id
     user_id = event.source.user_id
     msg = event.message.text.strip()
     g = get_group_data(group_id)
 
-    # 指令清單
-    cmds = ["/ID", "/設定群組資訊", "/清帳", "/撤回", "/查帳"]
-    is_cmd = any(msg.startswith(c) for c in cmds)
-    val = safe_calc(msg)
-    is_calc = val is not None
+    cmd_list = ["/ID","/設定群組資訊","/清帳","/撤回","/查帳"]
+    is_cmd = any(msg.startswith(c) for c in cmd_list)
+    calc_res = safe_calc(msg)
+    is_calc = calc_res is not None
 
-    # 一般聊天 => 完全不回覆
+    # 普通聊天直接忽略
     if not is_cmd and not is_calc:
         return
 
-    # 所有人可查 ID
+    # 所有人查ID
     if msg == "/ID":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"你的ID：\n{user_id}"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"你的LINE ID：\n{user_id}"))
         return
 
-    # 非管理員擋下
+    # 非管理員攔截
     if user_id not in ADMIN_LIST:
         return
 
     # 設定群組
     if msg.startswith("/設定群組資訊@"):
-        parts = msg.split("@")
-        if len(parts) == 3:
-            g["group_name"] = parts[1]
-            g["currency"] = parts[2]
+        sp = msg.split("@")
+        if len(sp)==3:
+            g["group_name"] = sp[1]
+            g["currency"] = sp[2]
             save_group_data(group_id, g)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage("✅ 設定成功"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage("✅ 群組資訊設定完成"))
         return
 
-    # 清帳
+    # 清帳歸零
     if msg == "/清帳":
         g["total_money"] = 0
         g["last_money"] = 0
         g["record_list"] = []
         save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage("✅ 已歸零"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(f"✅【{g['group_name']}】帳目已歸零"))
         return
 
     # 撤回
     if msg == "/撤回":
         if not g["record_list"]:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage("❌ 無記錄"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage("❌ 暫無記錄可撤回"))
             return
-        last = g["record_list"].pop()
-        g["total_money"] -= last["money"]
+        last_rec = g["record_list"].pop()
+        g["total_money"] -= last_rec["money"]
         g["last_money"] = g["record_list"][-1]["money"] if g["record_list"] else 0
         save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage("↩️ 已撤回"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage("↩️ 已撤回上一筆記帳"))
         return
 
     # 查帳
     if msg == "/查帳":
-        status = f"你欠{g['group_name']}：{g['total_money']}" if g["total_money"]>0 else f"{g['group_name']}欠你：{abs(g['total_money'])}"
-        card = build_account_card(f"【{g['group_name']}】查帳", g["last_money"], 0, status, "無", g['currency'])
+        if g["total_money"] > 0:
+            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
+        else:
+            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
+        card = build_account_card(f"【{g['group_name']}】帳務查詢",g["last_money"],0,status,"無",g['currency'])
         line_bot_api.reply_message(event.reply_token, card)
         return
 
     # 四則運算記帳
     if is_calc:
-        total = round(val, 2)
-        old = g["last_money"]
-        g["last_money"] = total
-        g["total_money"] += total
-        g["record_list"].append({"money": total, "note": msg})
-        save_group_data(group_id, g)
-        status = f"你欠{g['group_name']}：{g['total_money']}" if g["total_money"]>0 else f"{g['group_name']}欠你：{abs(g['total_money'])}"
-        card = build_account_card("✅ 記帳成功", old, total, status, msg, g['currency'])
-        line_bot_api.reply_message(event.reply_token, card)
-        return
+        now_num = round(calc_res,2)
+        old_num = g["last_money"]
+        g["last_money"] = now_num
+        g["total_money"] += now_num
+        g["record_list"].append({"money":now_num,"note":msg})
+        save_group_data(group_id,g)
+        if g["total_money"]>0:
+            st = f"目前你欠{g['group_name']}：{g['total_money']} {g['currency']}"
+        else:
+            st = f"目前{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
+        card = build_account_card("✅ 記帳成功",old_num,now_num,st,msg,g['currency'])
+        line_bot_api.reply_message(event.reply_token,card)
 
+# 重點：讀Render自動分配端口，不再寫死10000
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
