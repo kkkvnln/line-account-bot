@@ -51,7 +51,7 @@ def save_group_data(group_id, data):
 
 init_total_data()
 
-# 建立卡片的工具函數
+# 建立卡片
 def build_account_card(title, last_amount, current_amount, status_text, note, currency):
     bubble = BubbleContainer(
         direction='ltr',
@@ -60,8 +60,7 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
             contents=[
                 # 標題
                 TextComponent(text=title, color='#22C55E', size='xl', weight='bold'),
-                TextComponent(text=f"{current_amount}={current_amount}", color='#D2691E', size='lg', align='end'),
-                SeparatorComponent(),
+                SeparatorComponent(margin="md"),
                 # 上次金額
                 BoxComponent(
                     layout='horizontal',
@@ -73,13 +72,14 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
                 # 本次金額
                 BoxComponent(
                     layout='horizontal',
+                    margin="md",
                     contents=[
-                        TextComponent(text='本次金額', color="#555555", size="md'),
+                        TextComponent(text='本次金額', color='#555555', size='md'),
                         TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
                     ]
                 ),
-                SeparatorComponent(),
-                # 狀態文字（你欠/欠你）
+                SeparatorComponent(margin="md"),
+                # 狀態
                 BoxComponent(
                     layout='horizontal',
                     contents=[
@@ -87,7 +87,7 @@ def build_account_card(title, last_amount, current_amount, status_text, note, cu
                         TextComponent(text=status_text.split("：")[1], color='#D2691E', size='md', align='end')
                     ]
                 ),
-                SeparatorComponent(),
+                SeparatorComponent(margin="md"),
                 # 備註
                 BoxComponent(
                     layout='horizontal',
@@ -144,12 +144,10 @@ def handle_msg(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 無記錄可撤回"))
             return
         last = g["record_list"].pop()
-        old_total = g["total_money"]
         g["total_money"] -= last["money"]
         g["last_money"] = g["record_list"][-1]["money"] if g["record_list"] else 0
         save_group_data(group_id, g)
 
-        # 狀態文字
         if g["total_money"] > 0:
             status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
         else:
@@ -170,7 +168,7 @@ def handle_msg(event):
             last_amount=g["last_money"],
             current_amount=0,
             status_text=status,
-            note="",
+            note="無",
             currency=g['currency']
         )
         line_bot_api.reply_message(event.reply_token, card)
@@ -184,22 +182,20 @@ def handle_msg(event):
         note = parts[1] if len(parts) >= 2 else "無備註"
 
         old_last = g["last_money"]
-        old_total = g["total_money"]
-
         g["last_money"] = amount
         g["total_money"] += amount
         g["record_list"].append({"money": amount, "note": note})
         save_group_data(group_id, g)
 
-        # 狀態文字
+        # 狀態
         if g["total_money"] > 0:
             status = f"目前你欠{g['group_name']}：{g['total_money']} {g['currency']}"
         else:
             status = f"目前{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
 
-        # 建立卡片
+        # 卡片
         card = build_account_card(
-            title="計算結果",
+            title="✅ 記帳成功",
             last_amount=old_last,
             current_amount=amount,
             status_text=status,
