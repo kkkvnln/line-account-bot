@@ -1,33 +1,42 @@
 from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage,
-    FlexSendMessage, BubbleContainer, BoxComponent,
-    TextComponent, SeparatorComponent
-)
-import json
 import os
+import json
 import ast
+
+# LINE SDK V3 新版 (不會報錯、不會沒反應)
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage,
+    FlexMessage,
+    FlexBubble,
+    FlexBox,
+    FlexText,
+    FlexSeparator
+)
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 app = Flask(__name__)
 
-# 填入你自己正確的TOKEN和SECRET
-LINE_CHANNEL_ACCESS_TOKEN = "fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08IgrGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU="
-LINE_CHANNEL_SECRET = "44b024ae1f419f8443292df01c92d504"
-
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
+# 你的金鑰
+configuration = Configuration(
+    access_token="fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08IgrGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU="
+)
+handler = WebhookHandler("44b024ae1f419f8443292df01c92d504")
 
 DATA_FILE = "group_account.json"
 
-# 雙管理員ID
+# 管理員
 ADMIN_LIST = [
     "U79559883cba75878fca84feebb5f5cf4",
     "U27c2bccc9e129d9f417ecaa81a2cee14"
 ]
 
-# 安全計算四則運算
+# 安全計算
 def safe_calc(s):
     try:
         s = s.replace("×", "*").replace("÷", "/").replace(" ", "")
@@ -35,182 +44,155 @@ def safe_calc(s):
     except:
         return None
 
-# 初始化數據
-def init_total_data():
+# 檔案操作
+def init_data():
     if not os.path.exists(DATA_FILE):
-        save_total_data({})
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f)
 
-def load_total_data():
+def get_data(gid):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        d = json.load(f)
+    if gid not in d:
+        d[gid] = {"name": "帳本", "cur": "元", "total": 0, "last": 0, "rec": []}
+    return d
 
-def save_total_data(data):
+def save_data(gid, data):
+    d = get_data(gid)
+    d[gid] = data
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(d, f, ensure_ascii=False, indent=2)
 
-def get_group_data(group_id):
-    total_data = load_total_data()
-    if group_id not in total_data:
-        total_data[group_id] = {
-            "group_name": "未命名",
-            "currency": "台幣",
-            "total_money": 0,
-            "last_money": 0,
-            "record_list": []
-        }
-        save_total_data(total_data)
-    return total_data[group_id]
+init_data()
 
-def save_group_data(group_id, data):
-    total_data = load_total_data()
-    total_data[group_id] = data
-    save_total_data(total_data)
-
-init_total_data()
-
-# 記帳卡片模板
-def build_account_card(title, last_amount, current_amount, status_text, note, currency):
-    bubble = BubbleContainer(
-        direction='ltr',
-        body=BoxComponent(
-            layout='vertical',
-            contents=[
-                TextComponent(text=title, color='#22C55E', size='xl', weight='bold'),
-                SeparatorComponent(margin="md"),
-                BoxComponent(
-                    layout='horizontal',
-                    contents=[
-                        TextComponent(text='上次金額', color='#555555', size='md'),
-                        TextComponent(text=f"{last_amount} {currency}", color='#D2691E', size='md', align='end')
-                    ]
-                ),
-                BoxComponent(
-                    layout='horizontal',
-                    margin="md",
-                    contents=[
-                        TextComponent(text='本次金額', color='#555555', size='md'),
-                        TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
-                    ]
-                ),
-                SeparatorComponent(margin="md"),
-                BoxComponent(
-                    layout='horizontal',
-                    contents=[
-                        TextComponent(text=status_text.split("：")[0], color='#555555', size='md'),
-                        TextComponent(text=status_text.split("：")[1], color='#D2691E', size='md', align='end')
-                    ]
-                ),
-                SeparatorComponent(margin="md"),
-                BoxComponent(
-                    layout='horizontal',
-                    contents=[
-                        TextComponent(text='備註', color='#555555', size='md'),
-                        TextComponent(text=note, color='#888888', size='md', align='end')
-                    ]
-                )
-            ]
-        )
-    )
-    return FlexSendMessage(alt_text=title, contents=bubble)
-
-# 健康檢查路由
-@app.route("/", methods=["GET"])
+# 首頁
+@app.route("/")
 def home():
-    return "Bot Running OK"
+    return "✅ LINE 記帳機器人運作中"
 
-# LINE回調路由
-@app.route("/callback", methods=['POST'])
+# 回調
+@app.route("/callback", methods=["POST"])
 def callback():
-    signature = request.headers['X-Line-Signature']
+    sig = request.headers["X-Line-Signature"]
     body = request.get_data(as_text=True)
     try:
-        handler.handle(body, signature)
+        handler.handle(body, sig)
     except InvalidSignatureError:
         abort(400)
-    return 'OK'
+    return "OK"
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_msg(event):
-    group_id = event.source.group_id if hasattr(event.source, "group_id") else event.source.user_id
-    user_id = event.source.user_id
-    msg = event.message.text.strip()
-    g = get_group_data(group_id)
+# 訊息處理
+@handler.add(MessageEvent, message=TextMessageContent)
+def handle(event):
+    uid = event.source.user_id
+    gid = event.source.group_id if hasattr(event.source, "group_id") else uid
+    txt = event.message.text.strip()
+    d = get_data(gid)
+    g = d[gid]
 
-    cmd_list = ["/ID","/設定群組資訊","/清帳","/撤回","/查帳"]
-    is_cmd = any(msg.startswith(c) for c in cmd_list)
-    calc_res = safe_calc(msg)
-    is_calc = calc_res is not None
+    # 指令判斷
+    is_cmd = txt in ["/ID","/查帳","/清帳","/撤回"] or txt.startswith("/設定群組資訊@")
+    val = safe_calc(txt)
+    is_calc = val is not None
 
-    # 普通聊天直接忽略
+    # 一般聊天 → 完全不回
     if not is_cmd and not is_calc:
         return
 
-    # 所有人查ID
-    if msg == "/ID":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"你的LINE ID：\n{user_id}"))
-        return
+    with ApiClient(configuration) as api:
+        line = MessagingApi(api)
 
-    # 非管理員攔截
-    if user_id not in ADMIN_LIST:
-        return
-
-    # 設定群組
-    if msg.startswith("/設定群組資訊@"):
-        sp = msg.split("@")
-        if len(sp)==3:
-            g["group_name"] = sp[1]
-            g["currency"] = sp[2]
-            save_group_data(group_id, g)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage("✅ 群組資訊設定完成"))
-        return
-
-    # 清帳歸零
-    if msg == "/清帳":
-        g["total_money"] = 0
-        g["last_money"] = 0
-        g["record_list"] = []
-        save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(f"✅【{g['group_name']}】帳目已歸零"))
-        return
-
-    # 撤回
-    if msg == "/撤回":
-        if not g["record_list"]:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage("❌ 暫無記錄可撤回"))
+        # 所有人可查 ID
+        if txt == "/ID":
+            line.reply_message(ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=f"你的ID：{uid}")]
+            ))
             return
-        last_rec = g["record_list"].pop()
-        g["total_money"] -= last_rec["money"]
-        g["last_money"] = g["record_list"][-1]["money"] if g["record_list"] else 0
-        save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage("↩️ 已撤回上一筆記帳"))
-        return
 
-    # 查帳
-    if msg == "/查帳":
-        if g["total_money"] > 0:
-            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
-        else:
-            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
-        card = build_account_card(f"【{g['group_name']}】帳務查詢",g["last_money"],0,status,"無",g['currency'])
-        line_bot_api.reply_message(event.reply_token, card)
-        return
+        # 非管理員直接不回
+        if uid not in ADMIN_LIST:
+            return
 
-    # 四則運算記帳
-    if is_calc:
-        now_num = round(calc_res,2)
-        old_num = g["last_money"]
-        g["last_money"] = now_num
-        g["total_money"] += now_num
-        g["record_list"].append({"money":now_num,"note":msg})
-        save_group_data(group_id,g)
-        if g["total_money"]>0:
-            st = f"目前你欠{g['group_name']}：{g['total_money']} {g['currency']}"
-        else:
-            st = f"目前{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
-        card = build_account_card("✅ 記帳成功",old_num,now_num,st,msg,g['currency'])
-        line_bot_api.reply_message(event.reply_token,card)
+        # 設定群組
+        if txt.startswith("/設定群組資訊@"):
+            sp = txt.split("@")
+            if len(sp) == 3:
+                g["name"] = sp[1]
+                g["cur"] = sp[2]
+                save_data(gid, g)
+                line.reply_message(ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="✅ 設定完成")]
+                ))
+            return
 
-# 重點：讀Render自動分配端口，不再寫死10000
+        # 清除
+        if txt == "/清帳":
+            g["total"] = 0
+            g["last"] = 0
+            g["rec"] = []
+            save_data(gid, g)
+            line.reply_message(ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=f"✅ {g['name']} 已歸零")]
+            ))
+            return
+
+        # 撤回
+        if txt == "/撤回":
+            if not g["rec"]:
+                line.reply_message(ReplyMessageRequest(reply_token=event.reply_token,messages=[TextMessage(text="❌ 無紀錄")]))
+                return
+            r = g["rec"].pop()
+            g["total"] -= r["m"]
+            g["last"] = g["rec"][-1]["m"] if g["rec"] else 0
+            save_data(gid, g)
+            line.reply_message(ReplyMessageRequest(reply_token=event.reply_token,messages=[TextMessage(text="↩️ 已撤回")]))
+            return
+
+        # 查帳
+        if txt == "/查帳":
+            t = g["total"]
+            s = f"你欠{g['name']}：{t}{g['cur']}" if t>0 else f"{g['name']}欠你：{abs(t)}{g['cur']}"
+            bubble = FlexBubble(
+                body=FlexBox(layout="vertical", contents=[
+                    FlexText(text=f"📊 {g['name']} 查帳", weight="bold", size="xl"),
+                    FlexSeparator(margin="md"),
+                    FlexText(text=f"目前狀態：{s}", size="sm", margin="md")
+                ])
+            )
+            line.reply_message(ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[FlexMessage(alt_text="查帳", contents=bubble)]
+            ))
+            return
+
+        # 計算機記帳
+        if is_calc:
+            num = round(val, 2)
+            old = g["last"]
+            g["last"] = num
+            g["total"] += num
+            g["rec"].append({"m": num, "t": txt})
+            save_data(gid, g)
+            t = g["total"]
+            s = f"你欠{g['name']}：{t}{g['cur']}" if t>0 else f"{g['name']}欠你：{abs(t)}{g['cur']}"
+            bubble = FlexBubble(
+                body=FlexBox(layout="vertical", contents=[
+                    FlexText(text="✅ 記帳成功", weight="bold", size="xl", color="#00C853"),
+                    FlexSeparator(margin="md"),
+                    FlexText(text=f"本次：{num}", size="sm", margin="md"),
+                    FlexText(text=f"狀態：{s}", size="sm", margin="sm")
+                ])
+            )
+            line.reply_message(ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[FlexMessage(alt_text="記帳成功", contents=bubble)]
+            ))
+            return
+
+# 啟動
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
