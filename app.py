@@ -30,8 +30,8 @@ def callback():
 def handle_msg(msg):
     global last_money, current_money
 
-    # 1. 四則運算（同時當作本次金額）
-    if re.match(r'^[\d\+\-\*/\s\.]+$', msg):
+    # 1. 四則運算（支援開頭負號、小數、空格）
+    if is_valid_expression(msg):
         try:
             result = eval(msg)
             last_money = current_money
@@ -46,7 +46,7 @@ def handle_msg(msg):
             return TextSendMessage(text="⚠️ 計算錯誤，請輸入正確的數學式")
 
     # 2. 查詢目前金額
-    if msg in ["餘額", "查餘額", "小金庫欠"]:
+    if msg in ["餘額", "查餘額", "虎爺欠"]:
         return build_flex_card(
             calc_str="查詢",
             calc_result=0,
@@ -62,6 +62,12 @@ def handle_msg(msg):
 
     # 預設回覆
     return TextSendMessage(text="✅ 收到！\n輸入數學式（例：-2460*2）或「餘額」查詢")
+
+# 修正：支援開頭負號的數學式判斷
+def is_valid_expression(text):
+    # 允許：開頭可選負號、數字、+-*/、空格、小數點
+    pattern = r'^-?[\d\s\.\+\-\*\/]+$'
+    return re.match(pattern, text) is not None
 
 # 建立和你圖中一樣風格的 Flex 卡片
 def build_flex_card(calc_str, calc_result, last, current):
@@ -118,7 +124,7 @@ def build_flex_card(calc_str, calc_result, last, current):
                         )
                     ]
                 ),
-                # 目前小金庫欠
+                # 目前虎爺欠
                 BoxComponent(
                     layout="horizontal",
                     margin="lg",
