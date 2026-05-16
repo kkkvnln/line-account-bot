@@ -132,9 +132,9 @@ def handle_msg(event):
         save_group_data(group_id, g)
 
         if g["total_money"] > 0:
-            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
+            status = f"目前欠虎爺：{g['total_money']} {g['currency']}"
         else:
-            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
+            status = f"目前虎爺欠：{abs(g['total_money'])} {g['currency']}"
 
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"↩️ 撤回成功\n已刪除：{last['money']} ({last['note']})\n{status}"))
         return
@@ -142,9 +142,9 @@ def handle_msg(event):
     # === 查帳 ===
     if msg == "/查帳":
         if g["total_money"] > 0:
-            status = f"你欠{g['group_name']}：{g['total_money']} {g['currency']}"
+            status = f"目前欠虎爺：{g['total_money']} {g['currency']}"
         else:
-            status = f"{g['group_name']}欠你：{abs(g['total_money'])} {g['currency']}"
+            status = f"目前虎爺欠：{abs(g['total_money'])} {g['currency']}"
 
         card = build_account_card(
             title=f"【{g['group_name']}】帳務查詢",
@@ -157,29 +157,26 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, card)
         return
 
-    # ======================
-    # ✅ 支援「多則運算」+100+250-50
-    # ======================
-    try:
-        # 檢查是不是運算式（開頭 +-，後面都是數字與 +-）
-        if re.match(r'^[+-][\d+-]+$', msg):
-            # 直接計算總和
-            total = eval(msg)
-            note = "備注"
+    # 拆分運算式 + 備註
+    msg_parts = msg.split(" ", 1)
+    expr = msg_parts[0]
+    note = msg_parts[1].strip() if len(msg_parts) == 2 else "無"
 
+    # 判斷是否為合法加減運算式
+    if re.fullmatch(r'^[+-]\d+([+-]\d+)*$', expr):
+        try:
+            total = eval(expr)
             old_last = g["last_money"]
             g["last_money"] = total
             g["total_money"] += total
             g["record_list"].append({"money": total, "note": note})
             save_group_data(group_id, g)
 
-            # 狀態
             if g["total_money"] > 0:
                 status = f"目前欠虎爺：{g['total_money']} {g['currency']}"
             else:
                 status = f"目前虎爺欠：{abs(g['total_money'])} {g['currency']}"
 
-            # 卡片
             card = build_account_card(
                 title="✅ 記帳成功",
                 last_amount=old_last,
@@ -190,14 +187,14 @@ def handle_msg(event):
             )
             line_bot_api.reply_message(event.reply_token, card)
             return
-    except:
-        pass
+        except:
+            pass
 
-    # 說明
+    # 預設幫助訊息
     help_txt = """📝 記帳指令
 /設定群組資訊@名稱@幣別
-+100 → 單筆
-+100+250 → 多則
++100 備註
++100+250 合併記帳
 /查帳 /清帳 /撤回"""
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
 
