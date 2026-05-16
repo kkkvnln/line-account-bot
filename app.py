@@ -165,7 +165,6 @@ def handle_msg(event):
         if re.match(r'^[+-][\d+-]+$', msg):
             # 直接計算總和
             total = eval(msg)
-            note = "連續運算"
 
             old_last = g["last_money"]
             g["last_money"] = total
