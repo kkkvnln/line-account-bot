@@ -1,14 +1,9 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage,
-    FlexSendMessage, BubbleContainer, BoxComponent,
-    TextComponent, SeparatorComponent
-)
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import json
 import os
-import re
 
 app = Flask(__name__)
 
@@ -19,198 +14,102 @@ CHANNEL_SECRET = "44b024ae1f419f8443292df01c92d504"
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-DATA_FILE = "group_account.json"
+DATA_FILE = "data.json"
 
-# 初始化檔案
-def init_data():
+# 初始化
+def init():
     if not os.path.exists(DATA_FILE):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({}, f, ensure_ascii=False, indent=2)
+            json.dump({}, f)
 
-def load_data():
+def load():
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def save_data(data):
+def save(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=True, indent=2)
 
-# 獲取群組資料
-def get_group_info(gid):
-    all_data = load_data()
-    if gid not in all_data:
-        all_data[gid] = {
-            "name": "預設群組",
-            "currency": "台幣",
-            "total": 0.0,
-            "last_num": 0.0,
-            "records": []
-        }
-        save_data(all_data)
-    return all_data[gid]
+init()
 
-init_data()
+# 伺服器測試
+@app.route("/")
+def index():
+    return "Bot is running!"
 
-# 建立彈窗卡片
-def make_card(title, last_val, now_val, tip, note, currency):
-    bubble = BubbleContainer(
-        body=BoxComponent(
-            layout="vertical",
-            contents=[
-                TextComponent(text=title, size="xl", weight="bold", color="#22c55e"),
-                SeparatorComponent(margin="md"),
-                BoxComponent(layout="horizontal", contents=[
-                    TextComponent(text="上次金額", color="#666"),
-                    TextComponent(text=f"{last_val} {currency}", align="end", color="#d2691e")
-                ]),
-                BoxComponent(layout="horizontal", margin="md", contents=[
-                    TextComponent(text="本次金額", color="#666"),
-                    TextComponent(text=f"{now_val} {currency}", align="end", color="#d2691e")
-                ]),
-                SeparatorComponent(margin="md"),
-                BoxComponent(layout="horizontal", contents=[
-                    TextComponent(text="目前狀態", color="#666"),
-                    TextComponent(text=tip.split("：")[-1], align="end", color="#d2691e")
-                ]),
-                SeparatorComponent(margin="md"),
-                BoxComponent(layout="horizontal", contents=[
-                    TextComponent(text="備註", color="#666"),
-                    TextComponent(text=note, align="end", color="#888")
-                ])
-            ]
-        )
-    )
-    return FlexSendMessage(alt_text=title, contents=bubble)
-
-# 網址接口
+# 回覆 LINE
 @app.route("/callback", methods=["POST"])
 def callback():
-    sig = request.headers.get("X-Line-Signature", "")
+    signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
     try:
-        handler.handle(body, sig)
+        handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
     return "OK"
 
-# 訊息監聽
 @handler.add(MessageEvent, message=TextMessage)
-def handle_msg(event):
-    msg = event.message.text.strip()
-    reply_token = event.reply_token
+def handle(event):
+    try:
+        text = event.message.text.strip()
+        reply_token = event.reply_token
 
-    # 判斷群組/個人ID
-    if hasattr(event.source, "group_id"):
-        talk_id = event.source.group_id
-    else:
-        talk_id = event.source.user_id
-
-    user_id = event.source.user_id
-    group_data = get_group_info(talk_id)
-    g_name = group_data["name"]
-    g_currency = group_data["currency"]
-
-    # ==============================
-    # 指令：設定群組資訊
-    # ==============================
-    if msg.startswith("/設定群組資訊@"):
-        sp = msg.split("@")
-        if len(sp) == 3:
-            all_d = load_data()
-            all_d[talk_id]["name"] = sp[1]
-            all_d[talk_id]["currency"] = sp[2]
-            save_data(all_d)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅設定完成\n群組名：{sp[1]}\n幣別：{sp[2]}"))
+        # 取得 ID
+        if hasattr(event.source, "group_id"):
+            gid = event.source.group_id
         else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌格式：/設定群組資訊@名稱@幣別"))
-        return
+            gid = event.source.user_id
 
-    # ==============================
-    # 指令：清帳
-    # ==============================
-    if msg == "/清帳":
-        all_d = load_data()
-        all_d[talk_id]["total"] = 0.0
-        all_d[talk_id]["last_num"] = 0.0
-        all_d[talk_id]["records"] = []
-        save_data(all_d)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅【{g_name}】帳務已全部歸零"))
-        return
+        # 讀資料
+        all_data = load()
+        if gid not in all_data:
+            all_data[gid] = {"total": 0, "records": []}
+        
+        data = all_data[gid]
 
-    # ==============================
-    # 指令：撤回
-    # ==============================
-    if msg == "/撤回":
-        if not group_data["records"]:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌暫無記錄可撤回"))
+        # ========== 指令 ==========
+        if text == "/測試":
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 機器人正常運作！"))
             return
 
-        last_rec = group_data["records"].pop()
-        all_d = load_data()
-        all_d[talk_id]["total"] -= last_rec["num"]
-        all_d[talk_id]["last_num"] = all_d[talk_id]["records"][-1]["num"] if all_d[talk_id]["records"] else 0.0
-        save_data(all_d)
-
-        now_total = all_d[talk_id]["total"]
-        if now_total > 0:
-            status = f"目前欠{g_name}：{now_total} {g_currency}"
-        else:
-            status = f"目前{g_name}欠：{abs(now_total)} {g_currency}"
-
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"↩️撤回成功\n刪除金額：{last_rec['num']}\n{status}"))
-        return
-
-    # ==============================
-    # 指令：查帳
-    # ==============================
-    if msg == "/查帳":
-        total_money = group_data["total"]
-        if total_money > 0:
-            s_txt = f"目前欠{g_name}：{total_money} {g_currency}"
-        else:
-            s_txt = f"目前{g_name}欠：{abs(total_money)} {g_currency}"
-
-        card = make_card(f"【{g_name}】帳務查詢", group_data["last_num"], 0, s_txt, "無", g_currency)
-        line_bot_api.reply_message(reply_token, card)
-        return
-
-    # ==============================
-    # 記帳 + 運算
-    # ==============================
-    split_msg = msg.split(" ", 1)
-    calc_str = split_msg[0]
-    note_text = split_msg[1].strip() if len(split_msg) > 1 else "無"
-
-    if re.match(r"^[+-][\d+\-*/.]+$", calc_str):
-        try:
-            cal_num = round(eval(calc_str), 2)
-            all_d = load_data()
-            old_last = all_d[talk_id]["last_num"]
-
-            all_d[talk_id]["last_num"] = cal_num
-            all_d[talk_id]["total"] += cal_num
-            all_d[talk_id]["records"].append({"num": cal_num, "note": note_text})
-            save_data(all_d)
-
-            new_total = all_d[talk_id]["total"]
-            if new_total > 0:
-                state = f"目前欠{g_name}：{new_total} {g_currency}"
-            else:
-                state = f"目前{g_name}欠：{abs(new_total)} {g_currency}"
-
-            send_card = make_card("✅記帳成功", old_last, cal_num, state, note_text, g_currency)
-            line_bot_api.reply_message(reply_token, send_card)
+        if text == "/清帳":
+            data["total"] = 0
+            data["records"] = []
+            all_data[gid] = data
+            save(all_data)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清帳！"))
             return
-        except:
-            pass
 
-    # ==============================
-    # 預設：說明
-    # ==============================
-    help_info = """📝可用指令
-/查詢ID
-/設定群組資訊@名稱@幣別
-+金額  -金額
-支援+ - * /
-/查帳  /撤回  /清帳"""
-    line_bot_api.reply_message(reply_token, TextSendMessage(text=help_info))
+        if text == "/撤回":
+            if not data["records"]:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 無紀錄"))
+                return
+            num = data["records"].pop()
+            data["total"] -= num
+            all_data[gid] = data
+            save(all_data)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"↩️ 撤回成功：{num}\n目前：{data['total']}"))
+            return
+
+        if text == "/查帳":
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"📊 目前總額：{data['total']}"))
+            return
+
+        # 記帳 +100 -50
+        if text.startswith("+") or text.startswith("-"):
+            num = float(eval(text))
+            data["total"] += num
+            data["records"].append(num)
+            all_data[gid] = data
+            save(all_data)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 記帳：{num}\n目前：{data['total']}"))
+            return
+
+        # 預設回覆
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="📝 指令：/測試 /查帳 /清帳 /撤回 +100 -50"))
+
+    except Exception as e:
+        print("錯誤：", e)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
