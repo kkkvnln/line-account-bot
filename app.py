@@ -9,12 +9,11 @@ from linebot.models import (
 import json
 import os
 import re
-import time
 
 app = Flask(__name__)
 
 # 你的 LINE Bot 憑證
-line_bot_api = LineBotApi('fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGtFUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU=')
+line_bot_api = LineBotApi('fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGtFUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZwaNux/gdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
 
 DATA_FILE = "group_account.json"
@@ -197,18 +196,18 @@ def handle_msg(event):
             line_bot_api.reply_message(event.reply_token, card)
             return
 
-    except Exception as e:
-        print("錯誤：", e)
-        return
-
-# 幫助
-help_txt = """📝 記帳指令
+        # 幫助說明
+        help_txt = """📝 記帳指令
 /查詢ID
 /設定群組資訊@名稱@幣別
 +100  -50
 +100*10  -2640*30
 /查帳 /清帳 /撤回"""
-line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
+
+    except Exception as e:
+        print("錯誤：", e)
+        return
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
