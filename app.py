@@ -196,7 +196,7 @@ def handle_msg(event):
             line_bot_api.reply_message(event.reply_token, card)
             return
 
-        # 幫助說明
+        # 無指令時 顯示幫助
         help_txt = """📝 記帳指令
 /查詢ID
 /設定群組資訊@名稱@幣別
@@ -206,7 +206,7 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
 
     except Exception as e:
-        print("錯誤：", e)
+        print("錯誤:", e)
         return
 
 if __name__ == "__main__":
