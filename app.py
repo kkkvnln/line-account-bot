@@ -1,46 +1,92 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import (
+    MessageEvent, TextMessage,
+    FlexSendMessage, BubbleContainer, BoxComponent,
+    TextComponent, SeparatorComponent
+)
 import json
 import os
+import re
 
 app = Flask(__name__)
 
 # 你的 LINE Bot 憑證
-CHANNEL_ACCESS_TOKEN = "fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGtFUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZwaNux/gdB04t89/1O/w1cDnyilFU="
-CHANNEL_SECRET = "44b024ae1f419f8443292df01c92d504"
+line_bot_api = LineBotApi('fgLUgkUwXjFD+W4Rw0N4isKahmyfq4iw/6uU4TGoKW+t0TDSiGt3C21FUALuIsB8RrGN6kvoWhgPbxXYw/TpNdV08I5grGmY7mzpeZKITRM/agQmoeXQZtUJSsA8oczCseKWVOewDu9DEZ4waNux/gdB04t89/1O/w1cDnyilFU=')
+handler = WebhookHandler('44b024ae1f419f8443292df01c92d504')
 
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
+DATA_FILE = "group_account.json"
 
-DATA_FILE = "data.json"
-
-# 初始化
-def init():
+# 初始化數據
+def init_total_data():
     if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({}, f)
+        save_total_data({})
 
-def load():
+def load_total_data():
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def save(data):
+def save_total_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=True, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-init()
+# 取得群組資料
+def get_group_data(group_id):
+    total_data = load_total_data()
+    if group_id not in total_data:
+        total_data[group_id] = {
+            "group_name": "預設名稱",
+            "currency": "台幣",
+            "total_money": 0,
+            "last_money": 0,
+            "record_list": []
+        }
+        save_total_data(total_data)
+    return total_data[group_id]
 
-# 伺服器測試
-@app.route("/")
-def index():
-    return "Bot is running!"
+def save_group_data(group_id, data):
+    total_data = load_total_data()
+    total_data[group_id] = data
+    save_total_data(total_data)
 
-# 回覆 LINE
-@app.route("/callback", methods=["POST"])
+init_total_data()
+
+# 建立卡片
+def build_account_card(title, last_amount, current_amount, status_text, note, currency):
+    bubble = BubbleContainer(
+        direction='ltr',
+        body=BoxComponent(
+            layout='vertical',
+            contents=[
+                TextComponent(text=title, color='#22C55E', size='xl', weight='bold'),
+                SeparatorComponent(margin="md"),
+                BoxComponent(layout='horizontal',contents=[
+                    TextComponent(text='上次金額', color='#555555', size='md'),
+                    TextComponent(text=f"{last_amount} {currency}", color='#D2691E', size='md', align='end')
+                ]),
+                BoxComponent(layout='horizontal',margin="md",contents=[
+                    TextComponent(text='本次金額', color='#555555', size='md'),
+                    TextComponent(text=f"{current_amount} {currency}", color='#D2691E', size='md', align='end')
+                ]),
+                SeparatorComponent(margin="md"),
+                BoxComponent(layout='horizontal',contents=[
+                    TextComponent(text=status_text.split("：")[0], color='#555555', size='md'),
+                    TextComponent(text=status_text.split("：")[1], color='#D2691E', size='md', align='end')
+                ]),
+                SeparatorComponent(margin="md"),
+                BoxComponent(layout='horizontal',contents=[
+                    TextComponent(text='備註', color='#555555', size='md'),
+                    TextComponent(text=note, color='#888888', size='md', align='end')
+                ])
+            ]
+        )
+    )
+    return FlexSendMessage(alt_text=title, contents=bubble)
+
+@app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers.get("X-Line-Signature", "")
+    signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
@@ -49,67 +95,117 @@ def callback():
     return "OK"
 
 @handler.add(MessageEvent, message=TextMessage)
-def handle(event):
-    try:
-        text = event.message.text.strip()
-        reply_token = event.reply_token
+def handle_msg(event):
+    group_id = event.source.group_id if hasattr(event.source, "group_id") else event.source.user_id
+    user_id = event.source.user_id
+    msg = event.message.text.strip()
+    g = get_group_data(group_id)
+    group_name = g["group_name"]
 
-        # 取得 ID
-        if hasattr(event.source, "group_id"):
-            gid = event.source.group_id
+    # === 查詢ID ===
+    if msg == "/查詢ID":
+        reply_text = f"🆔 使用者ID：{user_id}\n🆔 群組/對話ID：{group_id}"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        return
+
+    # === 設定群組資訊 ===
+    if msg.startswith("/設定群組資訊@"):
+        parts = msg.split("@")
+        if len(parts) == 3:
+            g["group_name"] = parts[1]
+            g["currency"] = parts[2]
+            save_group_data(group_id, g)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ 設定成功\n群組：{g['group_name']}\n幣別：{g['currency']}"))
         else:
-            gid = event.source.user_id
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式：/設定群組資訊@小金庫@台幣"))
+        return
 
-        # 讀資料
-        all_data = load()
-        if gid not in all_data:
-            all_data[gid] = {"total": 0, "records": []}
-        
-        data = all_data[gid]
+    # === 清帳 ===
+    if msg == "/清帳":
+        g["total_money"] = 0
+        g["last_money"] = 0
+        g["record_list"] = []
+        save_group_data(group_id, g)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅【{group_name}】已歸零"))
+        return
 
-        # ========== 指令 ==========
-        if text == "/測試":
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 機器人正常運作！"))
+    # === 撤回 ===
+    if msg == "/撤回":
+        if not g["record_list"]:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 無記錄可撤回"))
             return
+        last = g["record_list"].pop()
+        g["total_money"] -= last["money"]
+        g["last_money"] = g["record_list"][-1]["money"] if g["record_list"] else 0
+        save_group_data(group_id, g)
 
-        if text == "/清帳":
-            data["total"] = 0
-            data["records"] = []
-            all_data[gid] = data
-            save(all_data)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清帳！"))
+        if g["total_money"] > 0:
+            status = f"目前欠{group_name}：{g['total_money']} {g['currency']}"
+        else:
+            status = f"目前{group_name}欠：{abs(g['total_money'])} {g['currency']}"
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"↩️ 撤回成功\n已刪除：{last['money']} ({last['note']})\n{status}"))
+        return
+
+    # === 查帳 ===
+    if msg == "/查帳":
+        if g["total_money"] > 0:
+            status = f"目前欠{group_name}：{g['total_money']} {g['currency']}"
+        else:
+            status = f"目前{group_name}欠：{abs(g['total_money'])} {g['currency']}"
+
+        card = build_account_card(
+            title=f"【{group_name}】帳務查詢",
+            last_amount=g["last_money"],
+            current_amount=0,
+            status_text=status,
+            note="無",
+            currency=g['currency']
+        )
+        line_bot_api.reply_message(event.reply_token, card)
+        return
+
+    # 運算記帳 僅+ -開頭 後支援加減乘除+備註
+    try:
+        msg_parts = msg.split(" ", 1)
+        expr = msg_parts[0].strip()
+        note = msg_parts[1].strip() if len(msg_parts) > 1 else "無"
+
+        if re.fullmatch(r'^[+-][\d+\-*/]+$', expr):
+            total = round(eval(expr), 2)
+
+            old_last = g["last_money"]
+            g["last_money"] = total
+            g["total_money"] += total
+            g["record_list"].append({"money": total, "note": note})
+            save_group_data(group_id, g)
+
+            if g["total_money"] > 0:
+                status = f"目前欠{group_name}：{g['total_money']} {g['currency']}"
+            else:
+                status = f"目前{group_name}欠：{abs(g['total_money'])} {g['currency']}"
+
+            card = build_account_card(
+                title="✅ 記帳成功",
+                last_amount=old_last,
+                current_amount=total,
+                status_text=status,
+                note=note,
+                currency=g['currency']
+            )
+            line_bot_api.reply_message(event.reply_token, card)
             return
+    except:
+        pass
 
-        if text == "/撤回":
-            if not data["records"]:
-                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 無紀錄"))
-                return
-            num = data["records"].pop()
-            data["total"] -= num
-            all_data[gid] = data
-            save(all_data)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"↩️ 撤回成功：{num}\n目前：{data['total']}"))
-            return
-
-        if text == "/查帳":
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"📊 目前總額：{data['total']}"))
-            return
-
-        # 記帳 +100 -50
-        if text.startswith("+") or text.startswith("-"):
-            num = float(eval(text))
-            data["total"] += num
-            data["records"].append(num)
-            all_data[gid] = data
-            save(all_data)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 記帳：{num}\n目前：{data['total']}"))
-            return
-
-        # 預設回覆
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="📝 指令：/測試 /查帳 /清帳 /撤回 +100 -50"))
-
-    except Exception as e:
-        print("錯誤：", e)
+    # 幫助提示
+    help_txt = """📝 記帳指令
+/查詢ID
+/設定群組資訊@名稱@幣別
++100  -50
++100*10  -2640*30
+/查帳 /清帳 /撤回"""
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_txt))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
