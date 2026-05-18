@@ -2,7 +2,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage,
+    MessageEvent, TextMessage, TextSendMessage,
     FlexSendMessage, BubbleContainer, BoxComponent,
     TextComponent, SeparatorComponent
 )
@@ -120,16 +120,16 @@ def handle_msg(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式：/設定群組資訊@小金庫@台幣"))
         return
 
-    # === 清帳 ===
+    # === 清帳 === 純文字
     if msg == "/清帳":
         g["total_money"] = 0
         g["last_money"] = 0
         g["record_list"] = []
         save_group_data(group_id, g)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅【{group_name}】已歸零"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅【{group_name}】已全部歸零"))
         return
 
-    # === 撤回 ===
+    # === 撤回 === 純文字
     if msg == "/撤回":
         if not g["record_list"]:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 無記錄可撤回"))
@@ -147,22 +147,14 @@ def handle_msg(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"↩️ 撤回成功\n已刪除：{last['money']} ({last['note']})\n{status}"))
         return
 
-    # === 查帳 ===
+    # === 查帳 === 純文字
     if msg == "/查帳":
         if g["total_money"] > 0:
-            status = f"目前欠{group_name}：{g['total_money']} {g['currency']}"
+            status = f"📊【{group_name}】\n目前欠：{g['total_money']} {g['currency']}"
         else:
-            status = f"目前{group_name}欠：{abs(g['total_money'])} {g['currency']}"
+            status = f"📊【{group_name}】\n對方欠：{abs(g['total_money'])} {g['currency']}"
 
-        card = build_account_card(
-            title=f"【{group_name}】帳務查詢",
-            last_amount=g["last_money"],
-            current_amount=0,
-            status_text=status,
-            note="無",
-            currency=g['currency']
-        )
-        line_bot_api.reply_message(event.reply_token, card)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=status))
         return
 
     # 運算記帳 僅+ -開頭 後支援加減乘除+備註
